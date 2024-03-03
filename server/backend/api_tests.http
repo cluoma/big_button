@@ -1,0 +1,26 @@
+### Send POST request with json body
+POST http://127.0.0.1:9898/api/button_press/new
+Content-Type: application/json
+
+[
+  {
+    "kiosk_id": 666,
+    "button": 1,
+    "clientdate": "2024-01-01T00:22:00Z"
+  },
+  {
+    "kiosk_id": 666,
+    "button": 2,
+    "clientdate": "2024-01-01T00:22:00Z"
+  }
+]
+
+### Send POST request with json body
+POST http://127.0.0.1:9898/api/button_press/new
+Content-Type: application/json
+
+[{"button": 1, "kiosk_id": 666, "clientdate": "2024-01-01T00:22:00Z"}]
+
+### GET request with a header
+GET http://127.0.0.1:9898/api/time
+Accept: application/json
