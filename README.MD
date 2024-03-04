@@ -1,5 +1,8 @@
 # Big Button
 
+![Picture of the Big Button Kiosk](images/image3.jpeg)
+![Picture of the Big Button Kiosk's wiring](images/image1.jpeg)
+
 This is the code for the Big Button Kiosk. It's a sentiment tool where people hit large buttons representing a likert scale.
 
 ## Kiosk
