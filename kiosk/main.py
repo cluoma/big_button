@@ -390,9 +390,10 @@ import _thread
 import time
 import machine
 import network
+import socket
 import sdcard
 import uos
-import urtc
+import lib.urtc as urtc
 import urequests as ur
 from machine import I2C, Pin, Timer
 
@@ -436,8 +437,97 @@ class Button:
             self.last_value = self.cur_value
             return 1
 
+class Wifi:
+    def __init__(self, ssid, password):
+        self.wlan = None
+        self.ssid = ssid
+        self.password = password
+
+    def connect(self):
+        self.wlan = network.WLAN(network.STA_IF)
+        self.wlan.active(True)
+        self.wlan.connect(self.ssid, self.password)
+
+        # Wait for connect or fail
+        max_wait = 60
+        while max_wait > 0:
+            if self.wlan.status() < 0 or self.wlan.status() >= 3:
+                break
+            max_wait -= 1
+            print('waiting for connection...')
+            time.sleep(1)
+
+        # Handle connection error
+        if self.wlan.status() != 3:
+            raise RuntimeError('network connection failed')
+        else:
+            print('connected')
+            status_led.value(1)
+            led_flash = Timer(-1)
+            led_flash.init(mode=Timer.ONE_SHOT, period=5000, callback=self.turn_off_status_led)
+            status = self.wlan.ifconfig()
+            print('ip = ' + status[0])
+
+    def try_reconnect(self):
+        if self.wlan == None:
+            return
+        if self.wlan.status() < 0 or self.wlan.status() >= 3:
+            print("trying to reconnect...")
+            self.wlan.disconnect()
+            self.wlan.connect(self.ssid, self.password)
+            if self.wlan.status() == 3:
+                print('connected')
+            else:
+                print('failed')
+
+    def wifi_status(self):
+        if self.wlan == None:
+            return None
+        return self.wlan.status()
+
+    def turn_off_status_led(self, t):
+        status_led.value(0)
+        t.deinit()
+
+class WebServer():
+    def __init__(self, ssid, password):
+        self.wlan = None
+        self.ssid = ssid
+        self.password = password
+
+    def run(self):
+        self.wlan = network.WLAN(network.AP_IF)
+        self.wlan.config(essid=self.ssid, password=self.password)
+        self.wlan.active(True)
+
+        while not self.wlan.active():
+            pass
+
+        print("connection successful")
+        print(self.wlan.ifconfig())
+
+        def webpage():
+            html = "<html><head><title>Hello</title></head><body><p>Hello world!</p></body></html>"
+            return html
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 80))
+        s.listen(5)
+
+        while True:
+            conn, addr = s.accept()
+            print("Connected by", addr)
+            data = conn.recv(1024)
+            if not data:
+                pass
+            conn.send('HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n')
+            conn.send(webpage())
+            conn.close()
+
+
 # button queue
 global bq
+CONFIG = {}
 
 # GPIO pin setup
 button_led_1 = Pin(10, Pin.OUT)
@@ -475,34 +565,34 @@ sd = sdcard.SDCard(spi, cs)
 vfs = uos.VfsFat(sd)
 uos.mount(vfs, "/sd")
 
-def turn_off_status_led(t):
-    status_led.value(0)
-    t.deinit()
+# def turn_off_status_led(t):
+#     status_led.value(0)
+#     t.deinit()
 
-def connect_wifi(ssid, password):
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(ssid, password)
-
-    # Wait for connect or fail
-    max_wait = 60
-    while max_wait > 0:
-        if wlan.status() < 0 or wlan.status() >= 3:
-            break
-        max_wait -= 1
-        print('waiting for connection...')
-        time.sleep(1)
-
-    # Handle connection error
-    if wlan.status() != 3:
-        raise RuntimeError('network connection failed')
-    else:
-        print('connected')
-        status_led.value(1)
-        led_flash = Timer(-1)
-        led_flash.init(mode=Timer.ONE_SHOT, period=5000, callback=turn_off_status_led)
-        status = wlan.ifconfig()
-        print('ip = ' + status[0])
+# def connect_wifi(ssid, password):
+#     wlan = network.WLAN(network.STA_IF)
+#     wlan.active(True)
+#     wlan.connect(ssid, password)
+#
+#     # Wait for connect or fail
+#     max_wait = 60
+#     while max_wait > 0:
+#         if wlan.status() < 0 or wlan.status() >= 3:
+#             break
+#         max_wait -= 1
+#         print('waiting for connection...')
+#         time.sleep(1)
+#
+#     # Handle connection error
+#     if wlan.status() != 3:
+#         raise RuntimeError('network connection failed')
+#     else:
+#         print('connected')
+#         status_led.value(1)
+#         led_flash = Timer(-1)
+#         led_flash.init(mode=Timer.ONE_SHOT, period=5000, callback=turn_off_status_led)
+#         status = wlan.ifconfig()
+#         print('ip = ' + status[0])
 
 def set_rtc_from_api():
     try:
@@ -568,24 +658,31 @@ def server_log_press(press):
         r.close()
     except:
         print("Failed to send press to server")
+        wifi_conn.try_reconnect()
 
-def load_wifi_connection_details():
+def load_config(config_file = "wifi.txt"):
     # load wifi connection details from a file
     try:
-        f = open("/sd/wifi.txt", "r")
+        f = open("/sd/" + config_file, "r")
         lines = f.readlines()
         file_ssid = lines[0].rstrip()
         file_password = lines[1].rstrip()
         f.close()
-        return file_ssid, file_password
+        ret = {'ssid': file_ssid, 'password': file_password}
+        return ret
     except FileNotFoundError:
-        print("Cannot open 'wifi.txt'")
+        print("Cannot open '" + config_file + "'")
 
 
 ## Start program
 
-ssid, password = load_wifi_connection_details()
-connect_wifi(ssid, password)
+#w = WebServer("test", "123456789")
+#w.run()
+
+CONFIG = load_config()
+wifi_conn = Wifi(CONFIG['ssid'], CONFIG['password'])
+wifi_conn.connect()
+
 set_rtc_from_api()
 
 bq = []
