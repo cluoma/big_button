@@ -13,7 +13,7 @@ import lib.urtc as urtc
 import urequests as ur
 import ujson
 from machine import I2C, Pin, Timer
-from webserver import WebServer
+from lib.webserver import WebServer
 
 """Button - handles debouncing and button led status"""
 class Button:
@@ -175,7 +175,10 @@ def append_press_to_queue(button):
     """
     global bq
     t = rtc.datetime()
-    timestamp = f"{t.year}-{t.month:02d}-{t.day:02d}T{t.hour:02d}:{t.minute:02d}:{t.second:02d}Z"
+    if t != None:
+        timestamp = f"{t.year}-{t.month:02d}-{t.day:02d}T{t.hour:02d}:{t.minute:02d}:{t.second:02d}Z"
+    else:
+        timestamp = "1970-01-01T00:00:00Z"
     bq.append({"button": button, "timestamp": timestamp})
 
 def print_button_press():
@@ -242,12 +245,22 @@ def load_config(config_file = "config.txt"):
             f.close()
     except FileNotFoundError:
         print("Cannot open '" + config_file + "'")
+        return {}
+
+def save_config(payload, config_file = "config.txt"):
+    # save config parameters to file
+    try:
+        f = open("/sd/" + config_file, "w")
+        ujson.dump(payload, f)
+        f.close()
+    except FileNotFoundError:
+        print("Cannot open '" + config_file + "'")
 
 
 ## Start program
 
-#w = WebServer("test", "123456789")
-#w.run()
+w = WebServer("test", "123456789")
+new_wifi = w.run()
 
 # load config and check we got everything
 CONFIG = load_config()
@@ -258,6 +271,13 @@ except KeyError:
     print("Missing required config parameter")
     sys.exit(1)
 
+print("Got new wifi")
+CONFIG['ssid'] = new_wifi['ssid']
+CONFIG['password'] = new_wifi['password']
+save_config(CONFIG)
+
+sys.exit(1)
+
 # connect to the wifi
 wifi_conn = Wifi(CONFIG['ssid'], CONFIG['password'])
 wifi_conn.connect()
@@ -265,7 +285,7 @@ wifi_conn.connect()
 set_rtc_from_api()
 
 bq = []
-_thread.start_new_thread(print_button_press, ())
+#_thread.start_new_thread(print_button_press, ())
 
 while True:
     item_group = []
