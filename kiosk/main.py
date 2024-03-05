@@ -199,24 +199,29 @@ def print_button_press():
             print("button 4 pressed")
 
 
-def sd_log_press(press):
+def sd_log_press(presses):
     # log a button press to a file on the SD card
     try:
         f_log = open("/sd/log2.txt", "a")
-        print(f"Logging {press['button']},{press['timestamp']}")
-        f_log.write('{},{}\n'.format(press['button'], press['timestamp']))
+        #print(f"Logging {press['button']},{press['timestamp']}")
+        print(f"Logging {len(presses)} button presses")
+        for press in presses:
+            f_log.write('{},{}\n'.format(press['button'], press['timestamp']))
         f_log.close()
     except FileNotFoundError:
         print("Cannot open 'log2.txt'")
 
-def server_log_press(press):
+def server_log_press(presses):
     # send an http POST to button logging API
     try:
+        data = []
+        for press in presses:
+            data.append({'kiosk_id': 666, 'button': press['button'], 'clientdate': press['timestamp']})
         r = ur.post(
             "http://bigbutton.cluoma.com/api/button_press/new",
             # "http://192.168.0.112:9898/api/button_press/new",
             headers={'content-type': 'application/json'},
-            json=[{'kiosk_id': 666, 'button': press['button'], 'clientdate': press['timestamp']}]
+            json=data
         )
         print(r.status_code)
         r.close()
@@ -263,7 +268,10 @@ bq = []
 _thread.start_new_thread(print_button_press, ())
 
 while True:
-    if len(bq) > 0:
-        item = bq.pop(0)
-        sd_log_press(item)
-        server_log_press(item)
+    item_group = []
+    while len(bq) > 0 and len(item_group) <= 10:
+        item_group.append(bq.pop(0))
+    if len(item_group) > 0:
+        sd_log_press(item_group)
+        server_log_press(item_group)
+        item_group.clear()
