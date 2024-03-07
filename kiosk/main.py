@@ -15,7 +15,10 @@ import ujson
 from machine import I2C, Pin, Timer
 from lib.webserver import WebServer
 
-"""Button - handles debouncing and button led status"""
+"""
+Button
+handles debouncing and button led status
+"""
 class Button:
     def __init__(self, pin, led_pin, timeout=50):
         self.pin = pin
@@ -60,29 +63,83 @@ class Wifi:
         self.wlan = None
         self.ssid = ssid
         self.password = password
+        self.led_flash_timer = Timer(-1)
+        self.connect_progress = 0
+        self.connect_progress_dir = 1
+
+    def inc_connect_button_lights(self):
+        button_leds = [button_led_1, button_led_2, button_led_3, button_led_4]
+        for i in range(4):
+            if i <= self.connect_progress:
+                button_leds[i].value(1)
+            else:
+                button_leds[i].value(0)
+        self.connect_progress += self.connect_progress_dir
+        if self.connect_progress == 3:
+            self.connect_progress_dir = -1
+        elif self.connect_progress == 0:
+            self.connect_progress_dir = 1
+
+    def flash_buttons_success(self):
+        button_leds = [button_led_1, button_led_2, button_led_3, button_led_4]
+        for bled in button_leds:
+            bled.value(0)
+        time.sleep(0.5)
+        for i in range(3):
+            button_led_1.value(1)
+            time.sleep(0.5)
+            button_led_1.value(0)
+            time.sleep(0.5)
+    
+    def flash_buttons_failure(self):
+        button_leds = [button_led_1, button_led_2, button_led_3, button_led_4]
+        for bled in button_leds:
+            bled.value(0)
+        time.sleep(0.5)
+        for i in range(3):
+            button_led_4.value(1)
+            time.sleep(0.5)
+            button_led_4.value(0)
+            time.sleep(0.5)
 
     def connect(self):
+        tries = 3
+        max_wait_per_try = 20
         self.wlan = network.WLAN(network.STA_IF)
-        self.wlan.active(True)
-        self.wlan.connect(self.ssid, self.password)
 
-        # Wait for connect or fail
-        max_wait = 60
-        while max_wait > 0:
-            if self.wlan.status() < 0 or self.wlan.status() >= 3:
+        # Try to connect
+        for i in range(tries):
+            self.wlan.active(True)
+            self.wlan.connect(self.ssid, self.password)
+
+            # Wait for connect or fail
+            max_wait = max_wait_per_try
+            while max_wait > 0:
+                if self.wlan.status() < 0 or self.wlan.status() == 3:
+                    break
+                max_wait -= 1
+                print('waiting for connection...')
+                self.inc_connect_button_lights()
+                time.sleep(1)
+            
+            if self.wlan.status() != 3:
+                self.wlan.disconnect()
+                self.wlan.active(False)
+            else:
                 break
-            max_wait -= 1
-            print('waiting for connection...')
-            time.sleep(1)
 
         # Handle connection error
-        if self.wlan.status() != 3:
+        if self.wlan.status() == network.STAT_WRONG_PASSWORD:
+            self.flash_buttons_failure()
             raise RuntimeError('network connection failed')
+        elif self.wlan.status() != 3:
+            self.flash_buttons_failure()
+            raise RuntimeError('network connection failed')
+        # Handle connection success
         else:
             print('connected')
+            self.flash_buttons_success()
             status_led.value(1)
-            led_flash = Timer(-1)
-            led_flash.init(mode=Timer.ONE_SHOT, period=5000, callback=self.turn_off_status_led)
             status = self.wlan.ifconfig()
             print('ip = ' + status[0])
 
@@ -102,10 +159,6 @@ class Wifi:
         if self.wlan == None:
             return None
         return self.wlan.status()
-
-    def turn_off_status_led(self, t):
-        status_led.value(0)
-        t.deinit()
 
 
 # button queue
@@ -148,14 +201,17 @@ sd = sdcard.SDCard(spi, cs)
 vfs = uos.VfsFat(sd)
 uos.mount(vfs, "/sd")
 
+# base url for API
+API_BASE_URL = "http://bigbutton.cluoma.com"
+#API_BASE_URL = "http://192.168.0.112:9898"
+
 def set_rtc_from_api():
     """
     Query the API to get the current time and set the RTC
     """
     try:
         r = ur.get(
-            "http://bigbutton.cluoma.com/time",
-            # "http://192.168.0.112:9898/api/time",
+            API_BASE_URL + "/api/time",
             headers={'accept': 'application/json'}
         )
         if r.status_code == 200:
@@ -221,8 +277,7 @@ def server_log_press(presses):
         for press in presses:
             data.append({'kiosk_id': 666, 'button': press['button'], 'clientdate': press['timestamp']})
         r = ur.post(
-            "http://bigbutton.cluoma.com/api/button_press/new",
-            # "http://192.168.0.112:9898/api/button_press/new",
+            API_BASE_URL + "/api/button_press/new",
             headers={'content-type': 'application/json'},
             json=data
         )
@@ -259,8 +314,8 @@ def save_config(payload, config_file = "config.txt"):
 
 ## Start program
 
-w = WebServer("test", "123456789")
-new_wifi = w.run()
+#w = WebServer("test", "123456789")
+#new_wifi = w.run()
 
 # load config and check we got everything
 CONFIG = load_config()
@@ -271,21 +326,23 @@ except KeyError:
     print("Missing required config parameter")
     sys.exit(1)
 
-print("Got new wifi")
-CONFIG['ssid'] = new_wifi['ssid']
-CONFIG['password'] = new_wifi['password']
-save_config(CONFIG)
+# print("Got new wifi")
+# CONFIG['ssid'] = new_wifi['ssid']
+# CONFIG['password'] = new_wifi['password']
+# save_config(CONFIG)
 
-sys.exit(1)
 
 # connect to the wifi
 wifi_conn = Wifi(CONFIG['ssid'], CONFIG['password'])
-wifi_conn.connect()
+try:
+    wifi_conn.connect()
+except:
+    print("could not connect to wifi")
 
 set_rtc_from_api()
 
 bq = []
-#_thread.start_new_thread(print_button_press, ())
+_thread.start_new_thread(print_button_press, ())
 
 while True:
     item_group = []
