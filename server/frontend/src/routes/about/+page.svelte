@@ -4,7 +4,7 @@
 </svelte:head>
 
 <div class="text-column">
-	<h1>About</h1>
+	<h1>About the Big Button Feedback Kiosk</h1>
 
 	<p>A description</p>
 </div>
