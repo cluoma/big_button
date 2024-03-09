@@ -57,6 +57,9 @@ class Button:
         else:
             self.last_value = self.cur_value
             return 1
+    
+    def raw_value(self):
+        return self.pin.value()
 
 class Wifi:
     def __init__(self, ssid, password):
@@ -131,9 +134,11 @@ class Wifi:
         # Handle connection error
         if self.wlan.status() == network.STAT_WRONG_PASSWORD:
             self.flash_buttons_failure()
+            self.wlan.deinit()
             raise RuntimeError('network connection failed')
         elif self.wlan.status() != 3:
             self.flash_buttons_failure()
+            self.wlan.deinit()
             raise RuntimeError('network connection failed')
         # Handle connection success
         else:
@@ -311,35 +316,51 @@ def save_config(payload, config_file = "config.txt"):
     except FileNotFoundError:
         print("Cannot open '" + config_file + "'")
 
+def config_has_wifi_connection_parameters(config):
+    try:
+        config['ssid']
+        config['password']
+        return True
+    except KeyError:
+        print("Missing required config parameter")
+        return False
+
+def run_webserver():
+    w = WebServer("ButtonKiosk", "123456789")
+    button_led_2.value(1)
+    new_wifi = w.run()
+    print("Got new wifi")
+    CONFIG['ssid'] = new_wifi['ssid']
+    CONFIG['password'] = new_wifi['password']
+    save_config(CONFIG)
+    machine.reset()
 
 ## Start program
 
-#w = WebServer("test", "123456789")
-#new_wifi = w.run()
+class Mode():
+    ONLINE = 1
+    OFFLINE = 2
+
+# if button 4 is held down on boot, start in offline mode
+if button_4.raw_value() == 0:
+    MODE = Mode.OFFLINE
+else:
+    MODE = Mode.ONLINE
 
 # load config and check we got everything
 CONFIG = load_config()
-try:
-    CONFIG['ssid']
-    CONFIG['password']
-except KeyError:
-    print("Missing required config parameter")
-    sys.exit(1)
+if MODE == Mode.ONLINE and not config_has_wifi_connection_parameters(CONFIG):
+    run_webserver()
 
-# print("Got new wifi")
-# CONFIG['ssid'] = new_wifi['ssid']
-# CONFIG['password'] = new_wifi['password']
-# save_config(CONFIG)
-
-
-# connect to the wifi
-wifi_conn = Wifi(CONFIG['ssid'], CONFIG['password'])
-try:
-    wifi_conn.connect()
-except:
-    print("could not connect to wifi")
-
-set_rtc_from_api()
+# connect to the wifi and set RTC
+if MODE == Mode.ONLINE:
+    wifi_conn = Wifi(CONFIG['ssid'], CONFIG['password'])
+    try:
+        wifi_conn.connect()
+    except:
+        print("could not connect to wifi")
+        run_webserver()
+    set_rtc_from_api()
 
 bq = []
 _thread.start_new_thread(print_button_press, ())
@@ -350,5 +371,6 @@ while True:
         item_group.append(bq.pop(0))
     if len(item_group) > 0:
         sd_log_press(item_group)
-        server_log_press(item_group)
+        if MODE == Mode.ONLINE:
+            server_log_press(item_group)
         item_group.clear()

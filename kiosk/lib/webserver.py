@@ -132,6 +132,8 @@ class WebServer():
                 try:
                     wifi_config['ssid']
                     wifi_config['password']
+                    self.wlan.active(False)
+                    self.wlan.disconnect()
                     return wifi_config
                 except:
                     print("no password and ssid provided")
