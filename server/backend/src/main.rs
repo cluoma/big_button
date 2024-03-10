@@ -6,6 +6,7 @@ use actix_cors::Cors;
 use actix_web::{get, web, App, HttpServer, Responder, post, HttpResponse, error, HttpResponseBuilder};
 use actix_web::web::Json;
 use actix_files as fs;
+use actix_web::http::header::ContentType;
 use serde::{Deserialize, Serialize};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use chrono::{Datelike, DateTime, NaiveDateTime, Timelike, Utc};
@@ -17,7 +18,7 @@ struct ButtonPress {
     clientdate: Option<DateTime<Utc>>
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Press {
     id: i32,
     kiosk_id: u32,
@@ -80,12 +81,12 @@ async fn button_press_json(
 
     let mut stmt = conn.prepare("SELECT id, kiosk_id, button, serverdate FROM press").unwrap();
     let person_iter = stmt.query_map([], |row| {
-            Ok(Press {
-                id: row.get(0)?,
-                kiosk_id: row.get(1)?,
-                button: row.get(2)?,
-                serverdate: row.get(3)?,
-            })
+        Ok(Press {
+            id: row.get(0)?,
+            kiosk_id: row.get(1)?,
+            button: row.get(2)?,
+            serverdate: row.get(3)?,
+        })
     });
     let mut vec = Vec::new();
     for person in person_iter.unwrap() {
@@ -93,6 +94,40 @@ async fn button_press_json(
     }
 
     Ok(HttpResponse::Ok().json(vec))
+}
+
+#[get("/api/button_press/csv")]
+async fn button_press_csv(
+    pool: web::Data<DbPool>
+) -> actix_web::Result<impl Responder> {
+
+    // Obtaining a connection from the pool is also a potentially blocking operation.
+    // So, it should be called within the `web::block` closure, as well.
+    let conn = web::block(move || pool.get())
+        .await?
+        .map_err(error::ErrorInternalServerError)?;
+
+    let mut stmt = conn.prepare("SELECT id, kiosk_id, button, serverdate FROM press").unwrap();
+    let person_iter = stmt.query_map([], |row| {
+        Ok(Press {
+            id: row.get(0)?,
+            kiosk_id: row.get(1)?,
+            button: row.get(2)?,
+            serverdate: row.get(3)?,
+        })
+    });
+
+    let mut wtr = csv::Writer::from_writer(vec![]);
+    for person in person_iter.unwrap() {
+        wtr.serialize(person.unwrap());
+    }
+
+    let data = String::from_utf8(wtr.into_inner().unwrap());
+    Ok(
+        HttpResponse::Ok()
+            .append_header(("Content-Type", "text/csv"))
+            .body(data.unwrap())
+    )
 }
 
 #[get("/api/time")]
@@ -157,6 +192,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .service(button_press_new)
             .service(button_press_json)
+            .service(button_press_csv)
             .service(get_time)
             .service(fs::Files::new("/", "frontend/").index_file("index.html"))
             .app_data(web::JsonConfig::default().error_handler(|err, _req| {

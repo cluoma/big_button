@@ -24,3 +24,6 @@ Content-Type: application/json
 ### GET request with a header
 GET http://127.0.0.1:9898/api/time
 Accept: application/json
+
+### GET request with a header
+GET http://127.0.0.1:9898/api/button_press/csv
