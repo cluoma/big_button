@@ -55,6 +55,11 @@
 		}, {});
 	};
 
+	async function refreshData() {
+		allPresses = await buttonPresses();
+		await filterPresses();
+	}
+
 	function updateCharts(data) {
 		console.log("updating charts");
 		var allPressesGrouped = groupBy(data, 'button');
@@ -222,6 +227,11 @@
 	<div class="container">
 
 		<div class="selector">
+			<h4></h4>
+			<button class="button" on:click={refreshData}>Refresh</button>
+		</div>
+
+		<div class="selector">
 		<h4>Choose a kiosk:</h4>
 		<select bind:value={selectedKiosk} on:change={filterPresses} name="kiosks" id="kiosk-select">
 		<option value="">--select a kiosk--</option>
@@ -284,6 +294,27 @@
 	}
 	.selector {
 		width: 20%;
+	}
+	.button {
+		border: none;
+		color: white;
+		padding: 16px 32px;
+		text-align: center;
+		text-decoration: none;
+		display: inline-block;
+		font-size: 16px;
+		margin: 4px 2px;
+		transition-duration: 0.4s;
+		cursor: pointer;
+		background-color: #27708d;
+		color: white;
+		border: 2px solid #27708d;
+		justify-content: center;
+		align-items: center;
+	}
+	.button:hover {
+		background-color: #008CBA;
+		color: white;
 	}
 
 	@media screen and (max-width:990px) {
