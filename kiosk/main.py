@@ -20,6 +20,9 @@ Button
 handles debouncing and button led status
 """
 class Button:
+    DOWN = 0
+    UP = 1
+
     def __init__(self, pin, led_pin, timeout=50):
         self.pin = pin
         self.led_pin = led_pin
@@ -27,7 +30,7 @@ class Button:
         self.debounce_timer = Timer(-1)
         self.is_timeout = False
         self.cur_value = pin.value()
-        self.last_value = self.value
+        self.last_value = self.cur_value
 
     def _start_debounce_timer(self):
         self.debounce_timer.init(period=self.timeout, mode=Timer.ONE_SHOT,
@@ -48,19 +51,24 @@ class Button:
             self.is_timeout = True
             self._start_debounce_timer()
             self.last_value = self.cur_value
-            return 0
+            return self.DOWN
         elif self.cur_value == 1 and self.last_value != 1 and not self.is_timeout:
             self.is_timeout = True
             self._start_debounce_timer()
             self.last_value = self.cur_value
-            return 1
+            return self.UP
         else:
             self.last_value = self.cur_value
-            return 1
+            return self.UP
     
     def raw_value(self):
         return self.pin.value()
 
+
+"""
+Wifi
+manages the wifi connection
+"""
 class Wifi:
     def __init__(self, ssid, password):
         self.wlan = None
@@ -144,7 +152,6 @@ class Wifi:
         else:
             print('connected')
             self.flash_buttons_success()
-            status_led.value(1)
             status = self.wlan.ifconfig()
             print('ip = ' + status[0])
 
@@ -166,9 +173,21 @@ class Wifi:
         return self.wlan.status()
 
 
-# button queue
+# Enum for current operation mode; OFFLINE will not use any wifi features
+class Mode():
+    ONLINE = 1
+    OFFLINE = 2
+
+
+# Globals
 global bq
+bq = []
 CONFIG = {}
+MODE = Mode.OFFLINE
+# base url for API
+API_BASE_URL = "http://bigbutton.cluoma.com"
+#API_BASE_URL = "http://192.168.0.112:9898"
+
 
 # GPIO pin setup
 button_led_1 = Pin(10, Pin.OUT)
@@ -180,6 +199,8 @@ button_1 = Button(Pin(6, Pin.IN, Pin.PULL_UP), button_led_1)
 button_2 = Button(Pin(7, Pin.IN, Pin.PULL_UP), button_led_2)
 button_3 = Button(Pin(8, Pin.IN, Pin.PULL_UP), button_led_3)
 button_4 = Button(Pin(9, Pin.IN, Pin.PULL_UP), button_led_4)
+
+button_lock = _thread.allocate_lock()
 
 # status led on back of box
 status_led = Pin(14, Pin.OUT)
@@ -206,9 +227,6 @@ sd = sdcard.SDCard(spi, cs)
 vfs = uos.VfsFat(sd)
 uos.mount(vfs, "/sd")
 
-# base url for API
-API_BASE_URL = "http://bigbutton.cluoma.com"
-#API_BASE_URL = "http://192.168.0.112:9898"
 
 def set_rtc_from_api():
     """
@@ -219,6 +237,7 @@ def set_rtc_from_api():
             API_BASE_URL + "/api/time",
             headers={'accept': 'application/json'}
         )
+        print(r.status_code)
         if r.status_code == 200:
             data = r.json()
             print(data)
@@ -247,7 +266,7 @@ def print_button_press():
     This function runs in a separate thread to read button presses
     """
     global bq
-
+    button_lock.acquire()
     while True:
         if button_1.value() == 0:
             append_press_to_queue(1)
@@ -263,10 +282,12 @@ def print_button_press():
             print("button 4 pressed")
 
 
-def sd_log_press(presses):
-    # log a button press to a file on the SD card
+def sd_log_press(presses, file = "log.txt"):
+    """
+    Log a list of button presses to a file on the SD card
+    """
     try:
-        f_log = open("/sd/log2.txt", "a")
+        f_log = open("/sd/" + file, "a")
         #print(f"Logging {press['button']},{press['timestamp']}")
         print(f"Logging {len(presses)} button presses")
         for press in presses:
@@ -276,13 +297,16 @@ def sd_log_press(presses):
         print("Cannot open 'log2.txt'")
 
 def server_log_press(presses):
-    # send an http POST to button logging API
+    """
+    Log a list of button presses to the server by sending an HTTP POST request
+    """
+    ENDPOINT_URL = "/api/button_press/new"
     try:
         data = []
         for press in presses:
             data.append({'kiosk_id': 666, 'button': press['button'], 'clientdate': press['timestamp']})
         r = ur.post(
-            API_BASE_URL + "/api/button_press/new",
+            API_BASE_URL + ENDPOINT_URL,
             headers={'content-type': 'application/json'},
             json=data
         )
@@ -293,7 +317,9 @@ def server_log_press(presses):
         wifi_conn.try_reconnect()
 
 def load_config(config_file = "config.txt"):
-    # load config parameters from file
+    """
+    Load the JSON format config file from the SD card
+    """
     try:
         f = open("/sd/" + config_file, "r")
         try:
@@ -308,7 +334,9 @@ def load_config(config_file = "config.txt"):
         return {}
 
 def save_config(payload, config_file = "config.txt"):
-    # save config parameters to file
+    """
+    Save the JSON format config file to the SD card
+    """
     try:
         f = open("/sd/" + config_file, "w")
         ujson.dump(payload, f)
@@ -317,6 +345,9 @@ def save_config(payload, config_file = "config.txt"):
         print("Cannot open '" + config_file + "'")
 
 def config_has_wifi_connection_parameters(config):
+    """
+    Check if wifi connection parameters are present in the config object
+    """
     try:
         config['ssid']
         config['password']
@@ -326,8 +357,14 @@ def config_has_wifi_connection_parameters(config):
         return False
 
 def run_webserver():
+    """
+    Runs a simple HTTP webserver to get wifi connection information from the user
+    When connection details are obtained, update the config on the SD card and reset the pico
+    """
     w = WebServer("ButtonKiosk", "123456789")
+    # light up yellow light while running webserver
     button_led_2.value(1)
+    # w.run() should return an object with ssid and password
     new_wifi = w.run()
     print("Got new wifi")
     CONFIG['ssid'] = new_wifi['ssid']
@@ -336,20 +373,24 @@ def run_webserver():
     machine.reset()
 
 ## Start program
-
-class Mode():
-    ONLINE = 1
-    OFFLINE = 2
-
+button_lock.acquire()
 # if button 4 is held down on boot, start in offline mode
-if button_4.raw_value() == 0:
+# Offline mode only logs button presses to the SD card
+if button_4.raw_value() == Button.DOWN:
     MODE = Mode.OFFLINE
+    print("Running in offline mode")
 else:
     MODE = Mode.ONLINE
+    print("Running in online mode")
 
-# load config and check we got everything
+# load config and check if wifi connection details are present
 CONFIG = load_config()
 if MODE == Mode.ONLINE and not config_has_wifi_connection_parameters(CONFIG):
+    run_webserver()
+
+# shortcut to run the webserver when button 1 is held down
+# this is useful to change wifi details
+if MODE == Mode.ONLINE and button_1.raw_value() == Button.DOWN:
     run_webserver()
 
 # connect to the wifi and set RTC
@@ -362,8 +403,10 @@ if MODE == Mode.ONLINE:
         run_webserver()
     set_rtc_from_api()
 
-bq = []
-_thread.start_new_thread(print_button_press, ())
+# start polling for button presses in another thread
+if button_2.raw_value() == Button.UP:
+   button_lock.release()
+   _thread.start_new_thread(print_button_press, ())
 
 while True:
     item_group = []
