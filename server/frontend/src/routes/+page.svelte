@@ -1,7 +1,4 @@
 <script>
-	import Counter from './Counter.svelte';
-	import welcome from '$lib/images/svelte-welcome.webp';
-	import welcome_fallback from '$lib/images/svelte-welcome.png';
 	import { onMount } from 'svelte';
 	import {filter, mean} from 'mathjs';
 	import SveltyPicker from 'svelty-picker';
@@ -215,7 +212,7 @@
 </script>
 
 <svelte:head>
-	<title>Home</title>
+	<title>Daily Tracking</title>
 	<meta name="description" content="Svelte demo app" />
 </svelte:head>
 
@@ -228,7 +225,12 @@
 
 		<div class="selector">
 			<h4></h4>
-			<button class="button" on:click={refreshData}>Refresh</button>
+			<button style="width: 100%" class="button" on:click={refreshData}>Refresh</button>
+		</div>
+
+		<div class="selector">
+			<h4></h4>
+			<a class="button"  href="http://bigbutton.cluoma.com/api/button_press/csv" download="feedback_kiosk_data.csv">Download Data</a>
 		</div>
 
 		<div class="selector">
@@ -293,6 +295,7 @@
 		min-width: 50%;
 	}
 	.selector {
+		padding-right: 20px;
 		width: 20%;
 	}
 	.button {
