@@ -1,7 +1,7 @@
 mod setup_database;
 
 use std::{thread, time, str};
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, params, Result, ToSql};
 use actix_cors::Cors;
 use actix_web::{get, web, App, HttpServer, Responder, post, HttpResponse, error, HttpResponseBuilder};
 use actix_web::web::Json;
@@ -24,6 +24,13 @@ struct Press {
     kiosk_id: u32,
     button: u32,
     serverdate: NaiveDateTime,
+}
+
+#[derive(Deserialize)]
+struct ButtonPressRequest {
+    kiosk_id: u32,
+    startdate: Option<DateTime<Utc>>,
+    enddate: Option<DateTime<Utc>>,
 }
 
 type DbPool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
@@ -96,13 +103,68 @@ async fn button_press_json(
     Ok(HttpResponse::Ok().json(vec))
 }
 
+#[post("/api/button_press/filter")]
+async fn button_press_json_filter(
+    pool: web::Data<DbPool>,
+    button_press_request: web::Json<ButtonPressRequest>
+) -> actix_web::Result<impl Responder> {
+
+    // Obtaining a connection from the pool is also a potentially blocking operation.
+    // So, it should be called within the `web::block` closure, as well.
+    let conn = web::block(move || pool.get())
+        .await?
+        .map_err(error::ErrorInternalServerError)?;
+
+    let mut stmt = conn.prepare("\
+    SELECT id, kiosk_id, button, datetime(clientdate) \
+    FROM press \
+    WHERE kiosk_id = ?1 \
+    AND datetime(clientdate) >= ?2 \
+    AND datetime(clientdate) <= ?3 \
+    ").unwrap();
+    let person_iter = stmt.query_map(
+        (&button_press_request.kiosk_id, &button_press_request.startdate, &button_press_request.enddate),
+        |row| {
+            Ok(Press {
+                id: row.get(0)?,
+                kiosk_id: row.get(1)?,
+                button: row.get(2)?,
+                serverdate: row.get(3)?,
+            })
+        }).ok();
+    let mut vec = Vec::new();
+    for person in person_iter.unwrap() {
+        vec.push(person.unwrap());
+    }
+
+    Ok(HttpResponse::Ok().json(vec))
+}
+
+#[get("/api/kiosk/list")]
+async fn kiosk_list(
+    pool: web::Data<DbPool>
+) -> actix_web::Result<impl Responder> {
+
+    let conn = web::block(move || pool.get())
+        .await?
+        .map_err(error::ErrorInternalServerError)?;
+
+    let mut stmt = conn.prepare("SELECT DISTINCT kiosk_id FROM press").unwrap();
+    let iter = stmt.query_map([],|row| row.get(0)).unwrap();
+    let mut vec = Vec::new();
+    for kiosk_id in iter {
+        let t: u32 = kiosk_id.unwrap();
+        vec.push(t);
+    }
+
+    Ok(HttpResponse::Ok().json(vec))
+}
+
 #[get("/api/button_press/csv")]
 async fn button_press_csv(
     pool: web::Data<DbPool>
 ) -> actix_web::Result<impl Responder> {
 
-    // Obtaining a connection from the pool is also a potentially blocking operation.
-    // So, it should be called within the `web::block` closure, as well.
     let conn = web::block(move || pool.get())
         .await?
         .map_err(error::ErrorInternalServerError)?;
@@ -159,21 +221,6 @@ async fn get_time() -> actix_web::Result<impl Responder> {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
-    // let conn = Connection::open("db.sqlite3").unwrap();
-    // let mut stmt = conn.prepare("SELECT id, kiosk_id, button, serverdate FROM press").unwrap();
-    // let person_iter = stmt.query_map([], |row| {
-    //     Ok(Press {
-    //         id: row.get(0)?,
-    //         kiosk_id: row.get(1)?,
-    //         button: row.get(2)?,
-    //         serverdate: row.get(3)?,
-    //     })
-    // }).unwrap();
-    // for person in person_iter {
-    //     println!("Found person {:?}", person.unwrap());
-    // }
-
-
     setup_database::setup_database("db.sqlite3").expect("Could not setup database");
 
     // connect to SQLite DB
@@ -193,6 +240,8 @@ async fn main() -> std::io::Result<()> {
             .service(button_press_new)
             .service(button_press_json)
             .service(button_press_csv)
+            .service(button_press_json_filter)
+            .service(kiosk_list)
             .service(get_time)
             .service(fs::Files::new("/", "frontend/").index_file("index.html"))
             .app_data(web::JsonConfig::default().error_handler(|err, _req| {

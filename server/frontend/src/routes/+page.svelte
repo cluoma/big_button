@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { apihost } from '../stores.js'
 	import {filter, mean} from 'mathjs';
 	import SveltyPicker from 'svelty-picker';
 
@@ -41,7 +42,23 @@
 	}
 
 	async function buttonPresses() {
-		const p = await fetch('http://bigbutton.cluoma.com/api/button_press');
+		var date = new Date();
+		var start = new Date(new Date(selectedDate).getTime() + (date.getTimezoneOffset() * 60000)).toJSON();
+		var end = new Date(new Date(selectedDate).getTime() + (date.getTimezoneOffset() * 60000) + 24*60*60*1000).toJSON();
+		console.log("start: " + start);
+		console.log("end: " + end);
+		const p = await fetch( $apihost + '/api/button_press/filter',
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						kiosk_id: 666,
+						startdate: start,
+						enddate: end
+					})
+				});
 		return await p.json();
 	}
 
@@ -185,7 +202,8 @@
 		});
 
 		allPresses = await buttonPresses();
-		kiosks = [...new Set(allPresses.map(x => x.kiosk_id))];
+		kiosks = await (await fetch($apihost + "/api/kiosk/list")).json();
+		console.log("all kiosks: " + kiosks);
 		selectedKiosk = kiosks[0];
 		// buttons = [...new Set(allPresses.map(x => x.button))];
 		minDate = new Date(Math.min(...[...new Set(allPresses.map(x => new Date(x.serverdate + "Z")))]));
@@ -206,7 +224,7 @@
 		console.log(selectedDate)
 		if (e.detail !== selectedDate) {
 			selectedDate = e.detail;
-			filterPresses();
+			refreshData();
 		}
 	}
 </script>
@@ -230,7 +248,7 @@
 
 		<div class="selector">
 			<h4></h4>
-			<a class="button"  href="http://bigbutton.cluoma.com/api/button_press/csv" download="feedback_kiosk_data.csv">Download Data</a>
+			<a class="button"  href="{$apihost}/api/button_press/csv" download="feedback_kiosk_data.csv">Download Data</a>
 		</div>
 
 		<div class="selector">

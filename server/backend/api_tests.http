@@ -1,4 +1,4 @@
-### Send POST request with json body
+### Adding new button presses
 POST http://127.0.0.1:9898/api/button_press/new
 Content-Type: application/json
 
@@ -15,15 +15,28 @@ Content-Type: application/json
   }
 ]
 
-### Send POST request with json body
+### Adding a single new button press
 POST http://127.0.0.1:9898/api/button_press/new
 Content-Type: application/json
 
 [{"button": 1, "kiosk_id": 666, "clientdate": "2024-01-01T00:22:00Z"}]
 
-### GET request with a header
+### Current timestamp endpoint for RTC
 GET http://127.0.0.1:9898/api/time
 Accept: application/json
 
-### GET request with a header
+### Download all data in CSV
 GET http://127.0.0.1:9898/api/button_press/csv
+
+### List all kiosk_id in the database
+GET http://127.0.0.1:9898/api/kiosk/list
+
+### Get button presses for only a certain timeframe
+POST http://127.0.0.1:9898/api/button_press/filter
+Content-Type: application/json
+
+{
+  "kiosk_id": 666,
+  "startdate": "2024-03-04T07:00:00.000Z",
+  "enddate": "2024-03-05T07:00:00.000Z"
+}
