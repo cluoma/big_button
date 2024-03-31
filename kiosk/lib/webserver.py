@@ -2,6 +2,7 @@ import machine
 import socket
 import network
 import ujson
+import time
 
 def form_page():
     html = """
@@ -53,6 +54,9 @@ def unquote(string):
 
     if isinstance(string, str):
         string = string.encode('utf-8')
+
+    # account for '+' in string
+    string = string.replace(b'+', b' ')
 
     bits = string.split(b'%')
     if len(bits) == 1:
@@ -142,3 +146,4 @@ class WebServer():
                 conn.send('HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n')
                 conn.send(form_page())
                 conn.close()
+            time.sleep(1)
