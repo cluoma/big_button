@@ -33,6 +33,12 @@ struct ButtonPressRequest {
     enddate: Option<DateTime<Utc>>,
 }
 
+#[derive(Serialize)]
+struct Qotd {
+    day: String,
+    question: String,
+}
+
 type DbPool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
 
 #[post("/api/button_press/new")]
@@ -218,6 +224,29 @@ async fn get_time() -> actix_web::Result<impl Responder> {
     Ok(HttpResponse::Ok().json(ts))
 }
 
+#[get("/api/kiosk/qotd/{day}")]
+async fn kiosk_qotd(
+    pool: web::Data<DbPool>,
+    path: web::Path<String>
+) -> actix_web::Result<impl Responder> {
+
+    let day = path.into_inner();
+
+    let conn = web::block(move || pool.get())
+        .await?
+        .map_err(error::ErrorInternalServerError)?;
+
+    let mut stmt = conn.prepare("SELECT day, question FROM qotd WHERE day = ?1").unwrap();
+    let iter = stmt.query_map([day],|row| row.get(1)).unwrap();
+    let mut vec = Vec::new();
+    for question in iter {
+        let t: String = question.unwrap();
+        vec.push(t);
+    }
+
+    Ok(HttpResponse::Ok().json(vec))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
@@ -242,6 +271,7 @@ async fn main() -> std::io::Result<()> {
             .service(button_press_csv)
             .service(button_press_json_filter)
             .service(kiosk_list)
+            .service(kiosk_qotd)
             .service(get_time)
             .service(fs::Files::new("/", "frontend/").index_file("index.html"))
             .app_data(web::JsonConfig::default().error_handler(|err, _req| {

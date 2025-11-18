@@ -14,6 +14,14 @@ pub(crate) fn setup_database(db_path: &str) -> Result<()> {
         (),
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS qotd (
+            day    TEXT NOT NULL PRIMARY KEY,
+            question  TEXT NOT NULL
+        )",
+        (),
+    )?;
+
     conn.close().expect("Could not close database");
 
     Ok(())
