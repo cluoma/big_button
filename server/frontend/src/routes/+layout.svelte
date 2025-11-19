@@ -11,7 +11,7 @@
 	</main>
 
 	<footer>
-		<p>Copyright 2024</p>
+        <p>Made with ❤️ in the Yukon</p>
 	</footer>
 </div>
 
